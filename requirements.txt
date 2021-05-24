@@ -1,0 +1,11 @@
+numpy
+scipy
+chumpy
+opencv-python
+resampy
+python-speech-features
+image
+ipython
+matplotlib
+trimesh
+pyrender
