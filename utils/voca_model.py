@@ -20,11 +20,3 @@ class VOCAModel(nn.Module):
         self.velocity_loss = VelocityLoss(config=config)
         self.acceleration_loss = AccelerationLoss(config=config)
         self.verts_reg_loss = VertsRegularizerLoss(config=config)
-
-
-    def forward(self, processed_audio, condition, face_templates):
-        features = self.speech_encoder(processed_audio, condition)
-        exp_offset = self.expression_layer(features)
-        predicted = exp_offset + face_templates
-
-        return predicted

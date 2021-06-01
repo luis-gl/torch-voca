@@ -38,6 +38,9 @@ class Batcher:
     def get_training_size(self):
         return len(self.training_indices)
 
+    def get_validation_size(self):
+        return len(self.val_indices)
+
     def get_num_training_subjects(self):
         return self.data_handler.get_num_training_subjects()
 
@@ -84,8 +87,13 @@ class Batcher:
         else:
             return self.data_handler.slice_data(list(np.random.choice(self.test_indices, size=batch_size)))
 
-    def get_num_batches(self, batch_size):
-        return int(len(self.training_indices) / batch_size)
+    def get_num_batches(self, batch_size, key='train'):
+        if key == 'train':
+            return int(len(self.training_indices) / batch_size)
+        elif key == 'val':
+            return int(len(self.val_indices) / batch_size)
+        else:
+            return -1
 
     def get_training_sequences_in_order(self, num_of_sequences):
         return self.data_handler.get_training_sequences(num_of_sequences)
