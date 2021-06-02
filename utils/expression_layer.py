@@ -15,6 +15,6 @@ class ExpressionLayer(nn.Module):
 
     def forward(self, features):
         exp_offset = self.decoder(features)
-        exp_offset = torch.reshape(exp_offset, (-1, self.num_vertices, 3))
+        exp_offset = torch.reshape(exp_offset, (-1, self.num_vertices, 3, 1))
 
         return exp_offset
