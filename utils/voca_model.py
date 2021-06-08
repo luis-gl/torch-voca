@@ -11,10 +11,10 @@ class VOCAModel(nn.Module):
         self.config = config
 
         self.speech_encoder = SpeechEncoder(config)
-        self.encoder_optimizer = torch.optim.Adam(self.speech_encoder.parameters(), lr=config['learning_rate'], betas=(config['adam_beta1_value'], 0.999))
-
         self.expression_layer = ExpressionLayer(config)
-        self.decoder_optimizer = torch.optim.Adam(self.expression_layer.parameters(), lr=config['learning_rate'], betas=(config['adam_beta1_value'], 0.999))
+
+        model_parameters = list(self.speech_encoder.parameters()) + list(self.expression_layer.parameters())
+        self.optimizer = torch.optim.Adam(model_parameters, lr=config['learning_rate'], betas=(config['adam_beta1_value'], 0.999))
 
         self.reconstruction_loss = nn.L1Loss()
         self.velocity_loss = VelocityLoss(config=config)

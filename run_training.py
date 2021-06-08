@@ -65,38 +65,71 @@ def get_train_elements():
 
     return config, data_handler, batcher
 
-def train_step(config, batcher, model, device, debug=False):
-    # Tamaño del conjunto de datos de entrenamiento
-    n = batcher.get_num_batches(config['batch_size'], 'train')
-    print(f'Processing training batches, total: {n}')
-
-    # Pérdida de entrenamiento
-    train_loss = 0.
-
+def train_step(config, batcher, model, device):
+    
     model.train()
 
-    progress = 0
-    # Iteramos sobre todos los lotes de entrenamiento usando el batcher
-    for batch_num in range(n):
+    model.optimizer.zero_grad()
 
-        current_progress = int((float(batch_num+1)/n)*100)
-        if debug and progress != current_progress and current_progress % 20 == 0:
-            progress = current_progress
-            print(f'Processing batch {batch_num+1}/{n}...')
+    # Obtener datos para evaluarlos
+    processed_audio, face_vertices, face_templates, subject_idx = batcher.get_training_batch(config['batch_size'])
+    processed_audio = np.expand_dims(processed_audio, -1)
+    face_vertices = np.expand_dims(face_vertices, -1)
+    face_templates = np.expand_dims(face_templates, -1)
+
+    # Convertimos los datos a tensores y los movemos al dispositivo
+    processed_audio = torch.from_numpy(processed_audio).type(torch.float32).to(device)
+    face_vertices = torch.from_numpy(face_vertices).type(torch.float32).to(device)
+    face_templates = torch.from_numpy(face_templates).type(torch.float32).to(device)
+    subject_idx = torch.from_numpy(subject_idx)
+
+    condition = nn.functional.one_hot(subject_idx, batcher.get_num_training_subjects()).to(device)
+
+    # Procesar los datos en la red para obtener los movimientos de vértices 3D
+    encoded = model.speech_encoder(processed_audio, condition)
+    exp_offset = model.expression_layer(encoded)
+    predicted = exp_offset + face_templates
+
+    # Calculamos la pérdida
+    rec_loss = model.reconstruction_loss(predicted, face_vertices)
+    vel_loss = model.velocity_loss(predicted, face_vertices)
+    # Según el paper, usan las dos funciones de pérdida anteriores,
+    # sin embargo también calculan dos más que tienen peso 0 (modificable en el archivo de configuración)
+    acc_loss = model.acceleration_loss(predicted, face_vertices)
+    verts_reg_loss = model.verts_reg_loss(exp_offset)
+    # Los pesos para cada función de pérdida se encuentran en el archivo de configuración
+    # Para el reconstruction_loss, se mantiene el peso en 1 siempre
+    loss = rec_loss + vel_loss + acc_loss + verts_reg_loss
+    
+    # Backpropagation y optimización
+    loss.backward()
+    model.optimizer.step()
+
+    return loss
+
+def validation_step(config, batcher, model, device):
+    
+    model.eval()
+
+    num_training_subjects = batcher.get_num_training_subjects()
+
+    with torch.no_grad():
 
         # Obtener datos para evaluarlos
-        processed_audio, face_vertices, face_templates, subject_idx = batcher.get_training_batch(config['batch_size'])
-        processed_audio = np.expand_dims(processed_audio, -1)
-        face_vertices = np.expand_dims(face_vertices, -1)
-        face_templates = np.expand_dims(face_templates, -1)
+        processed_audio, face_vertices, face_templates, _ = batcher.get_validation_batch(config['batch_size'])
+        processed_audio = np.expand_dims(np.tile(processed_audio, (num_training_subjects, 1, 1)), -1)
+        face_vertices = np.expand_dims(np.tile(face_vertices, (num_training_subjects, 1, 1)), -1)
+        face_templates = np.expand_dims(np.tile(face_templates, (num_training_subjects, 1, 1)), -1)
 
         # Convertimos los datos a tensores y los movemos al dispositivo
         processed_audio = torch.from_numpy(processed_audio).type(torch.float32).to(device)
         face_vertices = torch.from_numpy(face_vertices).type(torch.float32).to(device)
         face_templates = torch.from_numpy(face_templates).type(torch.float32).to(device)
-        subject_idx = torch.from_numpy(subject_idx)
 
-        condition = nn.functional.one_hot(subject_idx, batcher.get_num_training_subjects()).to(device)
+        condition = np.reshape(np.repeat(np.arange(num_training_subjects)[:,np.newaxis],
+                        repeats=config['num_consecutive_frames']*config['batch_size'], axis=-1), [-1,])
+        condition = torch.from_numpy(condition)
+        condition = nn.functional.one_hot(condition, batcher.get_num_training_subjects()).to(device)
 
         # Procesar los datos en la red para obtener los movimientos de vértices 3D
         encoded = model.speech_encoder(processed_audio, condition)
@@ -114,132 +147,64 @@ def train_step(config, batcher, model, device, debug=False):
         # Para el reconstruction_loss, se mantiene el peso en 1 siempre
         loss = rec_loss + vel_loss + acc_loss + verts_reg_loss
         
-        # Backpropagation y optimización
-        loss.backward()
-        model.encoder_optimizer.zero_grad()
-        model.decoder_optimizer.zero_grad()
-        model.encoder_optimizer.step()
-        model.decoder_optimizer.step()
+        return loss
 
-        # Adicionamos la pérdida de entrenamiento al total  
-        train_loss += loss.item()
-
-    # Promedio de función de pérdida y accuracy total
-    train_loss /= n
-
-    # Almacenamos todos los resultados en un diccionario
-    train_dic = {'train_loss': train_loss}
-    return train_dic
-
-def validation_step(config, batcher, model, device, debug=False):
-    # Tamaño del conjunto de datos de validación
-    n = batcher.get_num_batches(config['batch_size'], 'val')
-    print(f'Processing validation batches, total: {n}')
-    num_training_subjects = batcher.get_num_training_subjects()
-
-    # Pérdida y accuracy total de entrenamiento
-    val_loss = 0.
-    
-    model.eval()
-
-    progress = 0
-    with torch.no_grad():
-        # Iteramos sobre todos los lotes de validación
-        for batch_num in range(n):
-
-            current_progress = int((float(batch_num+1)/n)*100)
-            if debug and progress != current_progress and current_progress % 20 == 0:
-                progress = current_progress
-                print(f'Processing batch {batch_num+1}/{n}...')
-            
-            # Obtener datos para evaluarlos
-            processed_audio, face_vertices, face_templates, _ = batcher.get_validation_batch(config['batch_size'])
-            processed_audio = np.expand_dims(np.tile(processed_audio, (num_training_subjects, 1, 1)), -1)
-            face_vertices = np.expand_dims(np.tile(face_vertices, (num_training_subjects, 1, 1)), -1)
-            face_templates = np.expand_dims(np.tile(face_templates, (num_training_subjects, 1, 1)), -1)
-
-            # Convertimos los datos a tensores y los movemos al dispositivo
-            processed_audio = torch.from_numpy(processed_audio).type(torch.float32).to(device)
-            face_vertices = torch.from_numpy(face_vertices).type(torch.float32).to(device)
-            face_templates = torch.from_numpy(face_templates).type(torch.float32).to(device)
-
-            condition = np.reshape(np.repeat(np.arange(num_training_subjects)[:,np.newaxis],
-                            repeats=config['num_consecutive_frames']*config['batch_size'], axis=-1), [-1,])
-            condition = torch.from_numpy(condition)
-            condition = nn.functional.one_hot(condition, batcher.get_num_training_subjects()).to(device)
-
-            # Procesar los datos en la red para obtener los movimientos de vértices 3D
-            encoded = model.speech_encoder(processed_audio, condition)
-            exp_offset = model.expression_layer(encoded)
-            predicted = exp_offset + face_templates
-
-            # Calculamos la pérdida
-            rec_loss = model.reconstruction_loss(predicted, face_vertices)
-            vel_loss = model.velocity_loss(predicted, face_vertices)
-            # Según el paper, usan las dos funciones de pérdida anteriores,
-            # sin embargo también calculan dos más que tienen peso 0 (modificable en el archivo de configuración)
-            acc_loss = model.acceleration_loss(predicted, face_vertices)
-            verts_reg_loss = model.verts_reg_loss(exp_offset)
-            # Los pesos para cada función de pérdida se encuentran en el archivo de configuración
-            # Para el reconstruction_loss, se mantiene el peso en 1 siempre
-            loss = rec_loss + vel_loss + acc_loss + verts_reg_loss
-
-            # Adicionamos la pérdida de validación al total
-            val_loss += loss.item()
-
-    # Promedio de función de pérdida y accuracy total
-    val_loss /= n
-
-    # Almacenamos todos los resultados en un diccionario
-    val_dic = {'val_loss': val_loss}
-    return val_dic
-
-def train_model(config, batcher, model, device, num_epochs, debug_batches=False, debug_time=False):
-    # Histórico de la pérdida por iteración en el entrenamiento y prueba
-    train_loss_history = []
-    val_loss_history = []
-
-    time_per_epoch = []
-
+def train_model(config, batcher, model, device, num_epochs):
+    num_train_batches = batcher.get_num_batches(config['batch_size'], 'train')
+    num_val_batches = batcher.get_num_batches(config['batch_size'], 'val')
     # Movemos el modelo al dispositivo
     model = model.to(device)
 
-    # Iteramos sobre el número de épocas especificado
-    for epoch in range(num_epochs):
+    train_loss_history = []
+    val_loss_history = []
 
+    # Iteramos sobre el número de épocas especificado
+    for epoch in range(1, num_epochs+1):
+        print('Epoch {}/{}'.format(epoch, num_epochs))
+        print('-' * 10)
         start = time.time()
+        train_loss = 0.0
+        val_loss = 0.0
 
         # Fase de Entrenamiento
-        train_dic = train_step(config, batcher, model, device, debug_batches)
+        for _ in range(num_train_batches):
+            train_batch_loss = train_step(config, batcher, model, device)
+            train_loss += train_batch_loss.item() * config['batch_size']
 
         # Fase de Validación
-        val_dic = validation_step(config, batcher, model, device, debug_batches)
-    
-        # Imprimimos el promedio de la pérdida y el accuracy de la fase 
-        # de entrenamiento y validación
-        train_loss, val_loss = train_dic['train_loss'], val_dic['val_loss']
-        print(f'Época ({epoch+1}/{num_epochs}): ' \
-            + f'train_loss = {train_loss:>7f}, val_loss= {val_loss:.8f}')
+        for _ in range(num_val_batches):
+            val_batch_loss = validation_step(config, batcher, model, device)
+            val_loss += val_batch_loss * config['batch_size']
 
-        # Adicionamos la pérdida la histórico por época
-        train_loss_history.append(train_loss)
-        val_loss_history.append(val_loss)
+        if epoch % 5 == 0:
+            save_model(epoch, model, config)
+
+        epoch_train_loss = train_loss / batcher.get_training_size()
+        train_loss_history.append(epoch_train_loss)
+        epoch_val_loss = val_loss / batcher.get_validation_size()
+        val_loss_history.append(epoch_val_loss)
+
+        print('Train Loss: {:.4f} | Val Loss: {:.4f}'.format(epoch_train_loss, epoch_val_loss))
 
         end = time.time()
         timed = end - start
-        time_per_epoch.append(timed)
+        print(f'epoch {epoch}/{num_epochs} took {timed/60.0} minutes')
+    
+    model_dict = {'train_loss_history': train_loss_history,
+                'val_loss_history': val_loss_history}
+    return model_dict
 
-        if debug_time:
-            print(f'epoch {epoch+1}/{num_epochs} took {timed/60.0} minutes')
+def save_model(epoch, model, config):
+    save_path = os.path.join(config['checkpoint_dir'], 'checkpoints')
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    torch.save({
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optim_state_dict': model.optimizer.state_dict()
+    }, save_path + '/voca_checkpoint{}'.format(epoch))
 
-    # Creamos diccionario con información del entrenamiento y validación
-    model_dic = {'train_loss_history': train_loss_history,
-                'val_loss_history': val_loss_history,
-                'time_per_epoch': time_per_epoch}
-
-    return model_dic
-
-def plot_loss(model_dic, model_name=None):
+def plot_loss(model_dic, model_name=None, save=False):
     train_loss_history = model_dic['train_loss_history']
     val_loss_history = model_dic['val_loss_history']
     x_values = range(1, len(train_loss_history) + 1)
@@ -254,6 +219,8 @@ def plot_loss(model_dic, model_name=None):
     plt.xlabel('Epoch')
     plt.legend(loc='lower right')
     plt.show()
+    if save:
+        plt.savefig('./plots/{}_losses.png'.format(model_name))
 
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -262,9 +229,9 @@ def main():
     config, _, batcher = get_train_elements()
     
     model = VOCAModel(config=config)
-    epoch_num = 4 #config['epoch_num']
-    result = train_model(config, batcher, model, device, epoch_num, debug_batches=False, debug_time=True)
-       
+    epoch_num = 40 #config['epoch_num']
+    model_dict = train_model(config, batcher, model, device, epoch_num)
+    plot_loss(model_dict, 'VOCA', True)
 
 if __name__ == '__main__':
     main()

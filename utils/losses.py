@@ -38,7 +38,7 @@ class AccelerationLoss(nn.Module):
             x1_pred = torch.reshape(verts_predicted[:, -1, :], (-1, self.config['num_vertices'], 3, 1))
             x2_pred = torch.reshape(verts_predicted[:, -2, :], (-1, self.config['num_vertices'], 3, 1))
             x3_pred = torch.reshape(verts_predicted[:, -3, :], (-1, self.config['num_vertices'], 3, 1))
-            acc_pred = x1_pred-2*x2_pred+x3_pred
+            acc_pred = x1_pred - 2 * x2_pred + x3_pred
 
             verts_target = torch.reshape(target, (-1, self.config['num_consecutive_frames'], self.config['num_vertices'], 3))
             x1_target = torch.reshape(verts_target[:, -1, :], (-1, self.config['num_vertices'], 3, 1))
