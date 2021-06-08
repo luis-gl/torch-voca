@@ -19,6 +19,7 @@ from config_parser import read_config, create_default_config
 from utils.data_handler import DataHandler
 from utils.batcher import Batcher
 from utils.voca_model import VOCAModel
+from utils.losses import *
 
 def get_train_elements():
     # Prior to training, please adapt the hyper parameters in the config_parser.py and run the script to generate
@@ -65,11 +66,11 @@ def get_train_elements():
 
     return config, data_handler, batcher
 
-def train_step(config, batcher, model, device):
+def train_step(config, batcher, model, optimizer, loss_fn_dict, device):
     
     model.train()
 
-    model.optimizer.zero_grad()
+    optimizer.zero_grad()
 
     # Obtener datos para evaluarlos
     processed_audio, face_vertices, face_templates, subject_idx = batcher.get_training_batch(config['batch_size'])
@@ -86,28 +87,26 @@ def train_step(config, batcher, model, device):
     condition = nn.functional.one_hot(subject_idx, batcher.get_num_training_subjects()).to(device)
 
     # Procesar los datos en la red para obtener los movimientos de vértices 3D
-    encoded = model.speech_encoder(processed_audio, condition)
-    exp_offset = model.expression_layer(encoded)
-    predicted = exp_offset + face_templates
+    predicted, exp_offset = model(processed_audio, condition, face_templates)
 
     # Calculamos la pérdida
-    rec_loss = model.reconstruction_loss(predicted, face_vertices)
-    vel_loss = model.velocity_loss(predicted, face_vertices)
+    rec_loss = loss_fn_dict['rec'](predicted, face_vertices)
+    vel_loss = loss_fn_dict['vel'](predicted, face_vertices)
     # Según el paper, usan las dos funciones de pérdida anteriores,
     # sin embargo también calculan dos más que tienen peso 0 (modificable en el archivo de configuración)
-    acc_loss = model.acceleration_loss(predicted, face_vertices)
-    verts_reg_loss = model.verts_reg_loss(exp_offset)
+    acc_loss = loss_fn_dict['accel'](predicted, face_vertices)
+    verts_reg_loss = loss_fn_dict['verts'](exp_offset)
     # Los pesos para cada función de pérdida se encuentran en el archivo de configuración
     # Para el reconstruction_loss, se mantiene el peso en 1 siempre
     loss = rec_loss + vel_loss + acc_loss + verts_reg_loss
     
     # Backpropagation y optimización
     loss.backward()
-    model.optimizer.step()
+    optimizer.step()
 
     return loss
 
-def validation_step(config, batcher, model, device):
+def validation_step(config, batcher, model, loss_fn_dict, device):
     
     model.eval()
 
@@ -132,24 +131,22 @@ def validation_step(config, batcher, model, device):
         condition = nn.functional.one_hot(condition, batcher.get_num_training_subjects()).to(device)
 
         # Procesar los datos en la red para obtener los movimientos de vértices 3D
-        encoded = model.speech_encoder(processed_audio, condition)
-        exp_offset = model.expression_layer(encoded)
-        predicted = exp_offset + face_templates
+        predicted, exp_offset = model(processed_audio, condition, face_templates)
 
         # Calculamos la pérdida
-        rec_loss = model.reconstruction_loss(predicted, face_vertices)
-        vel_loss = model.velocity_loss(predicted, face_vertices)
+        rec_loss = loss_fn_dict['rec'](predicted, face_vertices)
+        vel_loss = loss_fn_dict['vel'](predicted, face_vertices)
         # Según el paper, usan las dos funciones de pérdida anteriores,
         # sin embargo también calculan dos más que tienen peso 0 (modificable en el archivo de configuración)
-        acc_loss = model.acceleration_loss(predicted, face_vertices)
-        verts_reg_loss = model.verts_reg_loss(exp_offset)
+        acc_loss = loss_fn_dict['accel'](predicted, face_vertices)
+        verts_reg_loss = loss_fn_dict['verts'](exp_offset)
         # Los pesos para cada función de pérdida se encuentran en el archivo de configuración
         # Para el reconstruction_loss, se mantiene el peso en 1 siempre
         loss = rec_loss + vel_loss + acc_loss + verts_reg_loss
         
         return loss
 
-def train_model(config, batcher, model, device, num_epochs):
+def train_model(config, batcher, model, optimizer, device, num_epochs, save=False):
     num_train_batches = batcher.get_num_batches(config['batch_size'], 'train')
     num_val_batches = batcher.get_num_batches(config['batch_size'], 'val')
     # Movemos el modelo al dispositivo
@@ -157,6 +154,18 @@ def train_model(config, batcher, model, device, num_epochs):
 
     train_loss_history = []
     val_loss_history = []
+
+    rec_loss = nn.L1Loss()
+    vel_loss = VelocityLoss(config, rec_loss)
+    accel_loss = AccelerationLoss(config, rec_loss)
+    verts_reg_loss = VertsRegularizerLoss(config)
+
+    loss_fn_dict = {
+        'rec': rec_loss,
+        'vel': vel_loss,
+        'accel': accel_loss,
+        'verts': verts_reg_loss
+    }
 
     # Iteramos sobre el número de épocas especificado
     for epoch in range(1, num_epochs+1):
@@ -168,15 +177,15 @@ def train_model(config, batcher, model, device, num_epochs):
 
         # Fase de Entrenamiento
         for _ in range(num_train_batches):
-            train_batch_loss = train_step(config, batcher, model, device)
+            train_batch_loss = train_step(config, batcher, model, optimizer, loss_fn_dict, device)
             train_loss += train_batch_loss.item() * config['batch_size']
 
         # Fase de Validación
         for _ in range(num_val_batches):
-            val_batch_loss = validation_step(config, batcher, model, device)
+            val_batch_loss = validation_step(config, batcher, model, loss_fn_dict, device)
             val_loss += val_batch_loss * config['batch_size']
 
-        if epoch % 5 == 0:
+        if save and epoch % 5 == 0:
             save_model(epoch, model, config)
 
         epoch_train_loss = train_loss / batcher.get_training_size()
@@ -228,9 +237,11 @@ def main():
 
     config, _, batcher = get_train_elements()
     
-    model = VOCAModel(config=config)
-    epoch_num = 40 #config['epoch_num']
-    model_dict = train_model(config, batcher, model, device, epoch_num)
+    model = VOCAModel(config, batcher)
+    model_parameters = list(model.speech_encoder.parameters()) + list(model.expression_layer.parameters())
+    optimizer = torch.optim.Adam(model_parameters, lr=config['learning_rate'], betas=(config['adam_beta1_value'], 0.999))
+    epoch_num = 1 #config['epoch_num']
+    model_dict = train_model(config, batcher, model, optimizer, device, epoch_num)
     plot_loss(model_dict, 'VOCA', True)
 
 if __name__ == '__main__':

@@ -2,10 +2,10 @@ import torch
 from torch import nn
 
 class VelocityLoss(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, rec_loss):
         super().__init__()
         self.config = config
-        self.reconstruction_loss = nn.L1Loss()
+        self.reconstruction_loss = rec_loss
 
     def forward(self, predicted, target):
         if self.config['velocity_weight'] > 0:
@@ -26,10 +26,10 @@ class VelocityLoss(nn.Module):
             return 0.0
 
 class AccelerationLoss(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, rec_loss):
         super().__init__()
         self.config = config
-        self.reconstruction_loss = nn.L1Loss()
+        self.reconstruction_loss = rec_loss
 
     def forward(self, predicted, target):
         if self.config['acceleration_weight'] > 0.0:
