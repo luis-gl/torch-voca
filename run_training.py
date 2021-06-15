@@ -5,12 +5,12 @@ Repositorio original: https://github.com/TimoBolkart/voca
 '''
 
 import os
-from pickle import TRUE
 import shutil
 import configparser
 
 import numpy as np
 import matplotlib.pyplot as plt
+import pickle
 import time
 import torch
 from torch import nn
@@ -19,6 +19,7 @@ from config_parser import read_config, create_default_config
 from utils.data_handler import DataHandler
 from utils.batcher import Batcher
 from utils.voca_model import VOCAModel
+from utils.model_render import ModelRender
 from utils.losses import *
 
 def get_train_elements():
@@ -64,7 +65,7 @@ def get_train_elements():
     data_handler = DataHandler(config)
     batcher = Batcher(data_handler)
 
-    return config, data_handler, batcher
+    return config, batcher
 
 def train_step(config, batcher, model, optimizer, loss_fn_dict, device):
     
@@ -146,7 +147,7 @@ def validation_step(config, batcher, model, loss_fn_dict, device):
         
         return loss
 
-def train_model(config, batcher, model, optimizer, device, num_epochs, save=False):
+def train_model(config, batcher, model, optimizer, device, num_epochs, save=False, render=False, model_render=None):
     num_train_batches = batcher.get_num_batches(config['batch_size'], 'train')
     num_val_batches = batcher.get_num_batches(config['batch_size'], 'val')
     # Movemos el modelo al dispositivo
@@ -176,24 +177,32 @@ def train_model(config, batcher, model, optimizer, device, num_epochs, save=Fals
         val_loss = 0.0
 
         # Fase de Entrenamiento
-        for _ in range(num_train_batches):
+        for batch_num in range(num_train_batches):
             train_batch_loss = train_step(config, batcher, model, optimizer, loss_fn_dict, device)
             train_loss += train_batch_loss.item() * config['batch_size']
 
-        # Fase de Validación
-        for _ in range(num_val_batches):
-            val_batch_loss = validation_step(config, batcher, model, loss_fn_dict, device)
-            val_loss += val_batch_loss * config['batch_size']
+            if batch_num % 50 == 0:
+                print(f'Epoch: {epoch} | Iter: {batch_num} | Loss: {train_batch_loss}')
+            if batch_num % 100 == 0:
+                val_batch_loss = validation_step(config, batcher, model, loss_fn_dict, device)
+                val_loss += val_batch_loss * config['batch_size']
+                print(f'Val Loss: {val_batch_loss}')
 
-        if save and epoch % 5 == 0:
-            save_model(epoch, model, config)
+        if save and epoch % 10 == 0:
+            save_model(epoch, model, optimizer, config)
+        
+        if render and (model_render is not None) and epoch % 20 == 0:
+            model_render.render_sequences(model, device, out_folder=os.path.join(config['checkpoint_dir'], 'videos', 'training_epoch_%d_iter_%d' % (epoch, batch_num))
+                                       , data_specifier='training')
+            model_render.render_sequences(model, device, out_folder=os.path.join(config['checkpoint_dir'], 'videos', 'validation_epoch_%d_iter_%d' % (epoch, batch_num))
+                                       , data_specifier='validation')
 
         epoch_train_loss = train_loss / batcher.get_training_size()
-        train_loss_history.append(epoch_train_loss)
+        train_loss_history.append(epoch_train_loss * 1000.0)
         epoch_val_loss = val_loss / batcher.get_validation_size()
-        val_loss_history.append(epoch_val_loss)
+        val_loss_history.append(epoch_val_loss * 1000.0)
 
-        print('Train Loss: {:.4f} | Val Loss: {:.4f}'.format(epoch_train_loss, epoch_val_loss))
+        print('Train Loss: {:.4f} | Val Loss: {:.4f}'.format(epoch_train_loss * 1000.0, epoch_val_loss * 1000.0))
 
         end = time.time()
         timed = end - start
@@ -201,19 +210,20 @@ def train_model(config, batcher, model, optimizer, device, num_epochs, save=Fals
     
     model_dict = {'train_loss_history': train_loss_history,
                 'val_loss_history': val_loss_history}
+    with open('model_losses.pickle', 'wb') as handle:
+            pickle.dump(model_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
     return model_dict
 
-def save_model(epoch, model, config):
+def save_model(epoch, model, optimizer, config):
     save_path = os.path.join(config['checkpoint_dir'], 'checkpoints')
     if not os.path.exists(save_path):
         os.makedirs(save_path)
     torch.save({
-        'epoch': epoch,
         'model_state_dict': model.state_dict(),
-        'optim_state_dict': model.optimizer.state_dict()
-    }, save_path + '/voca_checkpoint{}'.format(epoch))
+        'optim_state_dict': optimizer.state_dict()
+    }, save_path + '/voca_test_checkpoint{}.pt'.format(epoch))
 
-def plot_loss(model_dic, model_name=None, save=False):
+def plot_loss(model_dic, model_name=None, save=False, test=False):
     train_loss_history = model_dic['train_loss_history']
     val_loss_history = model_dic['val_loss_history']
     x_values = range(1, len(train_loss_history) + 1)
@@ -229,20 +239,25 @@ def plot_loss(model_dic, model_name=None, save=False):
     plt.legend(loc='lower right')
     plt.show()
     if save:
-        plt.savefig('./plots/{}_losses.png'.format(model_name))
+        if test:
+            fname = './plots/{}_losses_test.png'.format(model_name)
+        else:
+            fname = './plots/{}_losses.png'.format(model_name)
+        plt.savefig(fname)
 
 def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('Using {}'.format(device))
 
-    config, _, batcher = get_train_elements()
+    config, batcher = get_train_elements()
     
     model = VOCAModel(config, batcher)
     model_parameters = list(model.speech_encoder.parameters()) + list(model.expression_layer.parameters())
     optimizer = torch.optim.Adam(model_parameters, lr=config['learning_rate'], betas=(config['adam_beta1_value'], 0.999))
-    epoch_num = 1 #config['epoch_num']
-    model_dict = train_model(config, batcher, model, optimizer, device, epoch_num)
-    plot_loss(model_dict, 'VOCA', True)
+    model_render = ModelRender(config, batcher)
+    epoch_num = 40 #config['epoch_num']
+    model_dict = train_model(config, batcher, model, optimizer, device, epoch_num, save=True, render=True, model_render=model_render)
+    plot_loss(model_dict, 'VOCA', save=True, test=True)
 
 if __name__ == '__main__':
     main()
