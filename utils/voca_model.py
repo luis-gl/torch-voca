@@ -13,8 +13,8 @@ class VOCAModel(nn.Module):
         self.speech_encoder = SpeechEncoder(config)
         self.expression_layer = ExpressionLayer(config)
     
-    def forward(self, processed_audio, condition, face_templates):
+    def forward(self, processed_audio, condition, face_template):
         encoded = self.speech_encoder(processed_audio, condition)
         exp_offset = self.expression_layer(encoded)
-        predicted = exp_offset + face_templates
+        predicted = exp_offset + face_template
         return predicted, exp_offset

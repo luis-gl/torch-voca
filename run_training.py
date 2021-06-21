@@ -181,12 +181,12 @@ def train_model(config, batcher, model, optimizer, device, num_epochs, save=Fals
             train_batch_loss = train_step(config, batcher, model, optimizer, loss_fn_dict, device)
             train_loss += train_batch_loss.item() * config['batch_size']
 
-            if batch_num % 50 == 0:
-                print(f'Epoch: {epoch} | Iter: {batch_num} | Loss: {train_batch_loss}')
+            #if batch_num % 50 == 0:
+                #print(f'Epoch: {epoch} | Iter: {batch_num} | Loss: {train_batch_loss}')
             if batch_num % 100 == 0:
                 val_batch_loss = validation_step(config, batcher, model, loss_fn_dict, device)
                 val_loss += val_batch_loss * config['batch_size']
-                print(f'Val Loss: {val_batch_loss}')
+                #print(f'Val Loss: {val_batch_loss}')
 
         if save and epoch % 10 == 0:
             save_model(epoch, model, optimizer, config)
@@ -255,7 +255,7 @@ def main():
     model_parameters = list(model.speech_encoder.parameters()) + list(model.expression_layer.parameters())
     optimizer = torch.optim.Adam(model_parameters, lr=config['learning_rate'], betas=(config['adam_beta1_value'], 0.999))
     model_render = ModelRender(config, batcher)
-    epoch_num = 40 #config['epoch_num']
+    epoch_num = 20 #config['epoch_num']
     model_dict = train_model(config, batcher, model, optimizer, device, epoch_num, save=True, render=True, model_render=model_render)
     plot_loss(model_dict, 'VOCA', save=True, test=True)
 
