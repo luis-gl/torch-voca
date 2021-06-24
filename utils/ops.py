@@ -5,6 +5,7 @@ Repositorio original: https://github.com/TimoBolkart/voca
 '''
 
 from torch import nn
+from utils.init_trunc_norm import trunc_normal_
 
 class FCLayer(nn.Module):
     def __init__(self, in_units, out_units, init_weights=None, weightini=0.1, bias=0.0):
@@ -17,7 +18,8 @@ class FCLayer(nn.Module):
         elif weightini == 0.0:
             nn.init.constant_(self.layer.weight, weightini)
         else:
-            nn.init.normal_(self.layer.weight, std=weightini)
+            #nn.init.normal_(self.layer.weight, std=weightini)
+            self.layer.weight.data = trunc_normal_(self.layer.weight.data, std=weightini)
         
         # inicialización de bias
         nn.init.constant_(self.layer.bias, bias)
@@ -31,8 +33,10 @@ class CustomConv2d(nn.Module):
         self.conv_layer = nn.Conv2d(in_channels=in_ch, out_channels=out_ch, kernel_size=k_size, stride=stride, padding=padding)
 
         # inicialización de pesos y bias
-        nn.init.normal_(self.conv_layer.weight, std=std_dev)
-        nn.init.normal_(self.conv_layer.bias, std=std_dev)
+        #nn.init.normal_(self.conv_layer.weight, std=std_dev)
+        self.conv_layer.weight.data = trunc_normal_(self.conv_layer.weight.data, std=std_dev)
+        #nn.init.normal_(self.conv_layer.bias, std=std_dev)
+        self.conv_layer.bias.data = trunc_normal_(self.conv_layer.bias.data, std=std_dev)
     
     def forward(self, x):
         return self.conv_layer(x)

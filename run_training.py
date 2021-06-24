@@ -147,7 +147,7 @@ def validation_step(config, batcher, model, loss_fn_dict, device):
         
         return loss
 
-def train_model(config, batcher, model, optimizer, device, num_epochs, save=False, render=False, model_render=None):
+def train_model(config, batcher, model, optimizer, scheduler, device, num_epochs, save=False, render=False, model_render=None):
     num_train_batches = batcher.get_num_batches(config['batch_size'], 'train')
     num_val_batches = batcher.get_num_batches(config['batch_size'], 'val')
     # Movemos el modelo al dispositivo
@@ -187,6 +187,8 @@ def train_model(config, batcher, model, optimizer, device, num_epochs, save=Fals
                 val_batch_loss = validation_step(config, batcher, model, loss_fn_dict, device)
                 val_loss += val_batch_loss * config['batch_size']
                 #print(f'Val Loss: {val_batch_loss}')
+
+        scheduler.step()
 
         if save and epoch % 10 == 0:
             save_model(epoch, model, optimizer, config)
@@ -254,9 +256,10 @@ def main():
     model = VOCAModel(config, batcher)
     model_parameters = list(model.speech_encoder.parameters()) + list(model.expression_layer.parameters())
     optimizer = torch.optim.Adam(model_parameters, lr=config['learning_rate'], betas=(config['adam_beta1_value'], 0.999))
-    model_render = ModelRender(config, batcher)
-    epoch_num = 20 #config['epoch_num']
-    model_dict = train_model(config, batcher, model, optimizer, device, epoch_num, save=True, render=True, model_render=model_render)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, config['decay_rate'])
+    #model_render = ModelRender(config, batcher)
+    epoch_num = 40 #config['epoch_num']
+    model_dict = train_model(config, batcher, model, optimizer, scheduler, device, epoch_num, save=True, render=False)
     plot_loss(model_dict, 'VOCA', save=True, test=True)
 
 if __name__ == '__main__':
