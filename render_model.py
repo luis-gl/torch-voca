@@ -27,13 +27,13 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('Using {}'.format(device))
     
-    model, optimizer, config, batcher = load_model(epoch=1)
+    model, optimizer, config, batcher = load_model(epoch=10)
     model.to(device)
     model_render = ModelRender(config, batcher)
     model_render.render_sequences(model, device, out_folder=os.path.join(config['checkpoint_dir'], 'videos', 'training_epoch')
                                 , data_specifier='training')
-    model_render.render_sequences(model, device, out_folder=os.path.join(config['checkpoint_dir'], 'videos', 'validation_epoch')
-                                , data_specifier='validation')
+    #model_render.render_sequences(model, device, out_folder=os.path.join(config['checkpoint_dir'], 'videos', 'validation_epoch')
+    #                            , data_specifier='validation')
 
 if __name__ == '__main__':
     main()

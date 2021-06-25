@@ -258,7 +258,7 @@ def main():
     optimizer = torch.optim.Adam(model_parameters, lr=config['learning_rate'], betas=(config['adam_beta1_value'], 0.999))
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, config['decay_rate'])
     #model_render = ModelRender(config, batcher)
-    epoch_num = 40 #config['epoch_num']
+    epoch_num = 10 #config['epoch_num']
     model_dict = train_model(config, batcher, model, optimizer, scheduler, device, epoch_num, save=True, render=False)
     plot_loss(model_dict, 'VOCA', save=True, test=True)
 
