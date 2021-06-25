@@ -12,7 +12,7 @@ def load_model(epoch):
     if not os.path.exists(path):
         print('Path not found in: ', path)
         return None, None, config, batcher
-    checkpoint = torch.load(path + '/voca_test_checkpoint{}'.format(epoch))
+    checkpoint = torch.load(path + '/voca_test_checkpoint{}.pt'.format(epoch))
 
     model = VOCAModel(config, batcher)
     model_parameters = list(model.speech_encoder.parameters()) + list(model.expression_layer.parameters())

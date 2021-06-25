@@ -6,4 +6,5 @@ template/*
 !template/FLAME_sample.ply
 !template/readme.txt
 .ipynb_checkpoints/
-training/
+training/*
+!training/comparison
