@@ -30,7 +30,7 @@ def main():
     with open('model_losses.pickle', 'rb') as handle:
         model_dict1 = pickle.load(handle)
 
-    with open('model_losses_failed.pickle', 'rb') as handle2:
+    with open('model_losses_common_bn.pickle', 'rb') as handle2:
         model_dict2 = pickle.load(handle2)
     
     plot_loss(model_dict1, model_dict2, 'VOCA special vs common batchnorm in 10 epochs', save=True)
