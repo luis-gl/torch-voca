@@ -259,8 +259,8 @@ def main():
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, config['decay_rate'])
     #model_render = ModelRender(config, batcher)
     epoch_num = 10 #config['epoch_num']
-    model_dict = train_model(config, batcher, model, optimizer, scheduler, device, epoch_num, save=True, render=False)
-    plot_loss(model_dict, 'VOCA', save=True, test=True)
+    model_dict = train_model(config, batcher, model, optimizer, scheduler, device, epoch_num, save=True)
+    plot_loss(model_dict, 'VOCA', save=True)
 
 if __name__ == '__main__':
     main()

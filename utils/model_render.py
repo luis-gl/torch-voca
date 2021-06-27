@@ -50,12 +50,13 @@ class ModelRender:
             else:
                 raise NotImplementedError('Unknown data specifier %s' % data_specifier)
 
-            for i_seq in range(len(raw_audio)):
+            for i_seq in range(1):#(len(raw_audio)):
                 conditions = condition_subj_idx[i_seq]
                 for condition_idx in conditions:
                     condition_subj = self.batcher.convert_training_idx2subj(condition_idx)
                     video_fname = os.path.join(out_folder, '%s_%03d_condition_%s.mp4' % (data_specifier, i_seq, condition_subj))
                     self._render_sequences_helper(model, device, video_fname, raw_audio[i_seq], processed_audio[i_seq], templates[i_seq], vertices[i_seq], condition_idx)
+                    break
 
     def _render_sequences_helper(self, model, device, video_fname, seq_raw_audio, seq_processed_audio, seq_template, seq_verts, condition_idx):
         def add_image_text(img, text):
