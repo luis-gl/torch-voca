@@ -2,9 +2,4 @@ __pycache__/
 training_data/*
 !training_data/readme.txt
 .vscode/
-template/*
-!template/FLAME_sample.ply
-!template/readme.txt
 .ipynb_checkpoints/
-training/*
-!training/comparison
